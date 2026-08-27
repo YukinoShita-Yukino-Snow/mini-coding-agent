@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence
 
 
 class SafetyError(ValueError):
@@ -43,3 +44,58 @@ class Workspace:
         relative = resolved.relative_to(self.root).as_posix()
         return relative or "."
 
+
+_BLOCKED_EXECUTABLES = {
+    "bash",
+    "cmd",
+    "cmd.exe",
+    "del",
+    "format",
+    "powershell",
+    "powershell.exe",
+    "pwsh",
+    "pwsh.exe",
+    "reboot",
+    "remove-item",
+    "rm",
+    "shutdown",
+    "sh",
+    "wsl",
+}
+
+
+def validate_command(command: Sequence[str]) -> list[str]:
+    """校验非 Shell 命令，并返回普通字符串参数列表。"""
+
+    if isinstance(command, (str, bytes)) or not command:
+        raise SafetyError("command 必须是非空字符串数组")
+    if len(command) > 64:
+        raise SafetyError("command 参数数量过多")
+
+    normalized: list[str] = []
+    for item in command:
+        if not isinstance(item, str) or not item:
+            raise SafetyError("每个命令参数都必须是非空字符串")
+        if "\x00" in item:
+            raise SafetyError("命令参数不能包含空字节")
+        normalized.append(item)
+
+    executable = Path(normalized[0]).name.casefold()
+    if executable in _BLOCKED_EXECUTABLES:
+        raise SafetyError(f"禁止执行程序：{executable}")
+
+    lowered = [item.casefold() for item in normalized[1:]]
+    if executable in {"git", "git.exe"}:
+        joined = " ".join(lowered)
+        dangerous_git = (
+            "reset --hard",
+            "clean -f",
+            "checkout --",
+            "restore .",
+            "push --force",
+            "push -f",
+        )
+        if any(fragment in joined for fragment in dangerous_git):
+            raise SafetyError("禁止执行破坏性 Git 命令")
+
+    return normalized

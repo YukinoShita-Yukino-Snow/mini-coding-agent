@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from mini_agent.safety import SafetyError, Workspace
+from mini_agent.safety import SafetyError, Workspace, validate_command
 
 
 def test_workspace_rejects_parent_traversal(tmp_path: Path) -> None:
@@ -31,4 +31,17 @@ def test_workspace_rejects_secret_and_internal_paths(tmp_path: Path, path: str) 
 
 def test_workspace_allows_public_env_example(tmp_path: Path) -> None:
     assert Workspace(tmp_path).resolve(".env.example") == (tmp_path / ".env.example").resolve()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["powershell", "-Command", "Get-ChildItem"],
+        ["git", "reset", "--hard"],
+        ["git", "push", "--force"],
+    ],
+)
+def test_dangerous_commands_are_rejected(command: list[str]) -> None:
+    with pytest.raises(SafetyError):
+        validate_command(command)
 

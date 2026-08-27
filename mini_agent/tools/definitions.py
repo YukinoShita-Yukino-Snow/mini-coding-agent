@@ -89,5 +89,34 @@ FILE_TOOL_DEFINITIONS: list[dict] = [
     },
 ]
 
-TOOL_DEFINITIONS = list(FILE_TOOL_DEFINITIONS)
+RUN_COMMAND_DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "run_command",
+        "description": (
+            "在工作区中执行非 Shell 命令并捕获输出。可直接运行工作区内的程序，"
+            "例如 Windows 下的 ./app.exe；交互式程序可通过 stdin 提供输入。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "description": "可执行程序及其独立参数。",
+                },
+                "timeout_sec": {"type": "integer", "minimum": 1, "maximum": 120},
+                "stdin": {
+                    "type": "string",
+                    "description": "可选的标准输入文本；需要换行时使用 \\n。",
+                },
+            },
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+TOOL_DEFINITIONS = [*FILE_TOOL_DEFINITIONS, RUN_COMMAND_DEFINITION]
 
