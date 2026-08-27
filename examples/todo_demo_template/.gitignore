@@ -1,0 +1,5 @@
+tasks.json
+__pycache__/
+.pytest_cache/
+.mini-agent/
+
