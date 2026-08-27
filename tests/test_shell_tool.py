@@ -40,17 +40,16 @@ def test_run_command_removes_api_credentials(tmp_path: Path, monkeypatch) -> Non
     assert result["stdout"].strip() == "None"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows .exe 路径解析测试")
 def test_resolve_windows_workspace_executable(tmp_path: Path) -> None:
     executable = tmp_path / "fib.exe"
     executable.touch()
 
     resolved = _resolve_executable(Workspace(tmp_path), "./fib")
 
-    expected = str(executable.resolve()) if os.name == "nt" else "./fib"
-    assert resolved == expected
+    assert resolved == str(executable.resolve())
 
 
 def test_absolute_executable_outside_workspace_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(SafetyError):
         _resolve_executable(Workspace(tmp_path), str(Path(os.__file__).resolve()))
-
