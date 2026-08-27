@@ -18,9 +18,10 @@ def test_registry_returns_structured_errors(tmp_path: Path) -> None:
 
     unknown = registry.execute("missing_tool", {})
     invalid_json = json.loads(registry.execute_json("list_files", "not-json"))
+    non_string_json = json.loads(registry.execute_json("list_files", None))  # type: ignore[arg-type]
     outside = registry.execute("read_file", {"path": "../secret.txt"})
 
     assert unknown["ok"] is False
     assert invalid_json["ok"] is False
+    assert non_string_json["ok"] is False
     assert outside["ok"] is False
-

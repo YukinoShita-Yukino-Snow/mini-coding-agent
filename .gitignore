@@ -21,9 +21,11 @@ venv/
 env/
 build/
 dist/
+*.exe
+*.o
+*.obj
 
 # Agent 运行产物与演示工作区
 .mini-agent/
 demo_workspaces/
 *.log
-

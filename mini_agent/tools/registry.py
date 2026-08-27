@@ -48,9 +48,9 @@ class ToolRegistry:
     def execute_json(self, name: str, raw_arguments: str) -> str:
         try:
             arguments = json.loads(raw_arguments)
-        except json.JSONDecodeError as exc:
-            result = {"ok": False, "tool": name, "error": f"JSON 参数无效：{exc.msg}"}
+        except (json.JSONDecodeError, TypeError) as exc:
+            detail = exc.msg if isinstance(exc, json.JSONDecodeError) else "参数不是字符串"
+            result = {"ok": False, "tool": name, "error": f"JSON 参数无效：{detail}"}
         else:
             result = self.execute(name, arguments)
         return json.dumps(result, ensure_ascii=False)
-

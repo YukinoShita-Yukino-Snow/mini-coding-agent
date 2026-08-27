@@ -14,7 +14,10 @@ class JsonlRunLogger:
     """把每个 Agent 事件追加到一个本地 JSONL 记录。"""
 
     def __init__(self, workspace: str | Path) -> None:
-        run_directory = Path(workspace).resolve() / ".mini-agent" / "runs"
+        root = Path(workspace).resolve()
+        run_directory = (root / ".mini-agent" / "runs").resolve()
+        if root not in run_directory.parents:
+            raise ValueError("运行日志目录超出工作区")
         run_directory.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
         self.path = run_directory / f"run-{timestamp}.jsonl"
@@ -64,4 +67,3 @@ def _shorten(value: str, limit: int) -> str:
     if len(value) <= limit:
         return value
     return value[: limit - 3] + "..."
-

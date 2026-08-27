@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 from typing import Iterator
 
@@ -184,11 +185,23 @@ def replace_in_file(
 
 
 def _atomic_write(path: Path, content: str) -> None:
-    temporary = path.with_name(path.name + ".mini-agent.tmp")
+    temporary: Path | None = None
     try:
-        temporary.write_text(content, encoding="utf-8", newline="")
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="",
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
+        ) as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+            temporary = Path(stream.name)
         os.replace(temporary, path)
     except OSError:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
         raise
-
