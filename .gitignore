@@ -1,0 +1,29 @@
+# 凭据与本地配置
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# 虚拟环境与构建输出
+.venv/
+venv/
+env/
+build/
+dist/
+
+# Agent 运行产物与演示工作区
+.mini-agent/
+demo_workspaces/
+*.log
+

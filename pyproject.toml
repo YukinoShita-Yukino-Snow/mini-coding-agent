@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mini-coding-agent"
+version = "0.1.0"
+description = "A lightweight coding agent implemented from scratch."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.0,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<10",
+]
+
+[project.scripts]
+mini-agent = "mini_agent.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
