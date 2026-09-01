@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from openai import APITimeoutError
 
 from mini_agent.config import Settings
 from mini_agent.model_client import ModelClientError, OpenAIChatClient
@@ -105,3 +106,37 @@ def test_client_rejects_abnormally_finished_text(finish_reason: str) -> None:
 
     with pytest.raises(ModelClientError, match=f"未正常结束：{finish_reason}"):
         OpenAIChatClient(_settings(), client=fake).complete([], [])
+
+
+def test_client_retries_a_transient_timeout() -> None:
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="重试成功。", tool_calls=[]),
+                finish_reason="stop",
+            )
+        ],
+        usage=None,
+    )
+
+    class FlakyCompletions:
+        def __init__(self) -> None:
+            self.attempts = 0
+
+        def create(self, **_kwargs):
+            self.attempts += 1
+            if self.attempts == 1:
+                request = SimpleNamespace(method="POST", url="https://example.invalid")
+                raise APITimeoutError(request)
+            return response
+
+    completions = FlakyCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    sleeps: list[float] = []
+    settings = Settings(api_key="test", model="test-model", request_retries=1)
+
+    reply = OpenAIChatClient(settings, client=client, sleep=sleeps.append).complete([], [])
+
+    assert reply.content == "重试成功。"
+    assert completions.attempts == 2
+    assert sleeps == [1]
