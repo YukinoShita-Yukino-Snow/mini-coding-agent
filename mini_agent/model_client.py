@@ -75,6 +75,7 @@ class OpenAIChatClient:
         choice = response.choices[0]
         message = choice.message
         content = message.content or ""
+        finish_reason = getattr(choice, "finish_reason", None)
         parsed_calls: list[ToolCallRequest] = []
         serialized_calls: list[dict[str, Any]] = []
 
@@ -101,6 +102,8 @@ class OpenAIChatClient:
 
         if not content and not parsed_calls:
             raise ModelClientError("模型既没有返回文本，也没有返回工具调用")
+        if finish_reason not in {None, "stop", "tool_calls"}:
+            raise ModelClientError(f"模型响应未正常结束：{finish_reason}")
 
         assistant_message: dict[str, Any] = {"role": "assistant", "content": content or None}
         reasoning_content = getattr(message, "reasoning_content", None)
@@ -119,7 +122,7 @@ class OpenAIChatClient:
             content=content,
             tool_calls=tuple(parsed_calls),
             assistant_message=assistant_message,
-            finish_reason=getattr(choice, "finish_reason", None),
+            finish_reason=finish_reason,
             usage=usage_data,
         )
 
@@ -148,4 +151,3 @@ class OpenAIChatClient:
                 raise ModelClientError(f"模型请求失败：{exc}") from exc
 
         raise AssertionError("unreachable retry state")
-

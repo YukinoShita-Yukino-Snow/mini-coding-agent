@@ -89,3 +89,19 @@ def test_client_rejects_empty_response() -> None:
     with pytest.raises(ModelClientError, match="choices"):
         OpenAIChatClient(_settings(), client=fake).complete([], [])
 
+
+@pytest.mark.parametrize("finish_reason", ["length", "content_filter"])
+def test_client_rejects_abnormally_finished_text(finish_reason: str) -> None:
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="未完成的回答", tool_calls=[]),
+                finish_reason=finish_reason,
+            )
+        ],
+        usage=None,
+    )
+    fake, _ = _fake_client(response)
+
+    with pytest.raises(ModelClientError, match=f"未正常结束：{finish_reason}"):
+        OpenAIChatClient(_settings(), client=fake).complete([], [])
