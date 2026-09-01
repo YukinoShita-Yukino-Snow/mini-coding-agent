@@ -24,18 +24,24 @@ Agent 框架，也不依赖服务端托管的代码执行或文件工具。对�
 ## 架构
 
 ```text
-CLI -> Settings -> CodingAgent -> OpenAIChatClient -> 大语言模型
-                     |
-                     v
-                ToolRegistry
-                /          \
-           文件工具      命令工具
-                \          /
-                  本地工作区
+CLI（解析任务与参数）
+├──读取──> Settings ──提供配置──> OpenAIChatClient / CodingAgent
+└──构造并启动──> CodingAgent
+                   ├──双向管理──> ContextManager
+                   ├──消息与响应──> OpenAIChatClient <──HTTP──> 大语言模型
+                   ├──调用与结果──> ToolRegistry
+                   │                 ├── 文件工具 ─┐
+                   │                 └── 命令工具 ─┴──> Workspace 安全边界
+                   │                                         │
+                   │                                         v
+                   │                                     本地项目目录
+                   └──运行事件──> ConsoleReporter / JsonlRunLogger
 ```
 
-模型不能直接访问本地文件或终端，只能请求预定义的 JSON Schema 工具。详细流程和
-设计取舍见 [`docs/架构设计.md`](docs/架构设计.md)。
+每轮主循环把上下文消息和工具 JSON Schema 交给模型；模型返回工具请求后，
+`CodingAgent` 通过 `ToolRegistry` 在工作区内执行，并按调用 ID 把结果加入上下文。
+模型不再请求工具时任务正常完成。模型不能直接访问本地文件或终端。详细流程和设计
+取舍见 [`docs/架构设计.md`](docs/架构设计.md)。
 
 ## 环境要求
 
@@ -127,4 +133,3 @@ python -m pytest -q D:\code\todo-agent-demo
 路径限制、凭据屏蔽、非 Shell 命令、危险命令检查、超时和输出截断用于减少误操作，
 但不构成操作系统沙箱。被允许执行的项目程序仍可能访问当前用户拥有权限的资源。
 处理不可信代码时，应使用一次性副本、容器或虚拟机。
-
