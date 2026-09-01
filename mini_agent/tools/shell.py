@@ -113,6 +113,8 @@ def _coerce_output(output: str | bytes | None) -> str:
 def _truncate(value: str) -> tuple[str, bool]:
     if len(value) <= MAX_OUTPUT_CHARS:
         return value, False
-    marker = "\n...[输出已截断]"
-    return value[: MAX_OUTPUT_CHARS - len(marker)] + marker, True
-
+    marker = "\n...[中间输出已截断]...\n"
+    available = MAX_OUTPUT_CHARS - len(marker)
+    head_chars = available // 2
+    tail_chars = available - head_chars
+    return value[:head_chars] + marker + value[-tail_chars:], True

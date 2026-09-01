@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from mini_agent.safety import SafetyError, Workspace
-from mini_agent.tools.shell import _resolve_executable, run_command
+from mini_agent.tools.shell import (
+    MAX_OUTPUT_CHARS,
+    _resolve_executable,
+    _truncate,
+    run_command,
+)
 
 
 def test_run_command_captures_output_and_stdin(tmp_path: Path) -> None:
@@ -53,3 +58,15 @@ def test_resolve_windows_workspace_executable(tmp_path: Path) -> None:
 def test_absolute_executable_outside_workspace_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(SafetyError):
         _resolve_executable(Workspace(tmp_path), str(Path(os.__file__).resolve()))
+
+
+def test_truncate_preserves_output_head_and_tail() -> None:
+    value = "START-" + "x" * MAX_OUTPUT_CHARS + "-END"
+
+    truncated, was_truncated = _truncate(value)
+
+    assert was_truncated is True
+    assert len(truncated) == MAX_OUTPUT_CHARS
+    assert truncated.startswith("START-")
+    assert truncated.endswith("-END")
+    assert "...[中间输出已截断]..." in truncated
