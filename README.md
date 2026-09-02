@@ -19,6 +19,7 @@ Agent 框架，也不依赖服务端托管的代码执行或文件工具。对�
 - 上下文过长时按完整 assistant-tool 轮次压缩，保持消息结构合法。
 - 最大步骤数、连续工具错误、上下文异常和用户中断均可终止循环。
 - 终端展示执行进度，本地 JSONL 日志记录每次决策、操作和结果。
+- 完整工具轮次会保存本地检查点，可用 `--resume latest` 显式恢复未完成任务。
 - 模型客户端可以完全 Mock，核心测试不需要消耗 API 额度。
 
 ## 架构
@@ -35,7 +36,8 @@ CLI（解析任务与参数）
                    │                                         │
                    │                                         v
                    │                                     本地项目目录
-                   └──运行事件──> ConsoleReporter / JsonlRunLogger
+                   ├──运行事件──> ConsoleReporter / JsonlRunLogger
+                   └──完整轮次──> CheckpointStore
 ```
 
 每轮主循环把上下文消息和工具 JSON Schema 交给模型；模型返回工具请求后，
@@ -90,9 +92,31 @@ mini-agent --workspace D:\code\target-project "增加输入校验和对应测试
 
 ```text
 --max-steps N   覆盖本次运行的最大模型步骤数
---no-log        不生成 .mini-agent/runs/*.jsonl 本地记录
+--resume latest 从当前工作区的最新未完成检查点恢复
+--no-log        不生成本地运行日志和恢复检查点
 --version       显示版本
 ```
+
+## 恢复未完成任务
+
+未使用 `--no-log` 时，每次运行会在工作区的 `.mini-agent/checkpoints/` 保存本地检查点。
+检查点只在结构完整的 assistant-tool 轮次后更新，避免恢复出缺少工具结果的非法消息。
+达到最大步骤数、连续工具错误、API异常或用户中断后，可以显式恢复：
+
+```powershell
+python -m mini_agent --workspace D:\code\target-project --resume latest --max-steps 10
+```
+
+恢复时也可以提供新的处理说明：
+
+```powershell
+python -m mini_agent --workspace D:\code\target-project --resume latest --max-steps 10 "编译器已经安装，请先重新检查文件和测试后继续。"
+```
+
+恢复会保留原任务和完整消息历史，创建关联到父检查点的新运行；`--max-steps` 表示本次
+新增的模型轮数，连续工具错误计数从零开始。最新检查点已经完成时会拒绝恢复。恢复前
+程序不会自动判断文件是否被人工修改，因此默认恢复说明要求模型先重新检查当前文件和
+验证状态。检查点和 JSONL 日志都只保存在被 Git 忽略的 `.mini-agent/` 中。
 
 ## 本地工具
 
@@ -113,8 +137,8 @@ python -m pytest -q examples\todo_demo_template
 ```
 
 测试覆盖配置校验、模型响应解析、路径逃逸、凭据文件保护、文件修改、命令标准输入、
-Windows 本地程序解析、命令超时、子进程凭据隔离、上下文压缩、终止条件、日志和示例
-生成器。
+Windows 本地程序解析、命令超时、子进程凭据隔离、上下文压缩、终止条件、日志、
+检查点恢复和示例生成器。
 
 ## 可复现示例
 
