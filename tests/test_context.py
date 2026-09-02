@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from mini_agent.context import ContextManager
 
 
@@ -42,3 +44,31 @@ def test_raw_messages_are_not_modified_by_compaction() -> None:
 
     assert len(context.raw_messages[-1]["content"]) == 2_000
 
+
+def test_context_restores_messages_and_appends_recovery_note() -> None:
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "original task"},
+        _assistant_call("call-1"),
+        {"role": "tool", "tool_call_id": "call-1", "content": "result"},
+    ]
+
+    context = ContextManager.from_messages(messages)
+    context.append_user("重新检查文件后继续")
+
+    assert context.raw_messages[:-1] == messages
+    assert context.raw_messages[-1] == {
+        "role": "user",
+        "content": "重新检查文件后继续",
+    }
+
+
+def test_context_rejects_unpaired_tool_call() -> None:
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "task"},
+        _assistant_call("call-1"),
+    ]
+
+    with pytest.raises(ValueError, match="没有结果"):
+        ContextManager.from_messages(messages)
