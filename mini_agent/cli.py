@@ -9,8 +9,9 @@ from typing import Sequence
 
 from . import __version__
 from .agent import CodingAgent
+from .checkpoint import CheckpointError, CheckpointStore
 from .config import ConfigError, Settings
-from .context import ContextLimitError
+from .context import ContextLimitError, ContextManager
 from .events import ConsoleReporter, JsonlRunLogger, combine_sinks
 from .model_client import ModelClientError, OpenAIChatClient
 from .safety import SafetyError
@@ -22,7 +23,11 @@ def build_parser() -> argparse.ArgumentParser:
         prog="mini-agent",
         description="在指定工作区中运行轻量级编程智能体。",
     )
-    parser.add_argument("task", help="交给 Agent 的编程任务。")
+    parser.add_argument(
+        "task",
+        nargs="?",
+        help="交给 Agent 的编程任务；恢复时可作为补充说明省略。",
+    )
     parser.add_argument(
         "--workspace",
         default=".",
@@ -37,7 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-log",
         action="store_true",
-        help="不生成本地 .mini-agent/runs/*.jsonl 运行记录。",
+        help="不生成本地运行日志和恢复检查点。",
+    )
+    parser.add_argument(
+        "--resume",
+        choices=("latest",),
+        help="从当前工作区的最新未完成检查点显式恢复。",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -46,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.resume is None and not args.task:
+            raise ValueError("未恢复运行时必须提供任务")
+        if args.resume is not None and args.no_log:
+            raise ValueError("--resume 不能与 --no-log 同时使用")
+
         settings = Settings.from_env()
         workspace = Path(args.workspace).expanduser().resolve()
         registry = ToolRegistry(str(workspace))
@@ -56,6 +71,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.no_log:
             logger = JsonlRunLogger(workspace)
             sinks.append(logger)
+        event_sink = combine_sinks(*sinks)
+
+        context = None
+        resumed = None
+        run_task = args.task
+        if args.resume == "latest":
+            resumed = CheckpointStore.load_latest(workspace)
+            if resumed.status == "completed":
+                raise CheckpointError("最新检查点中的任务已经完成，无需恢复")
+            context = ContextManager.from_messages(
+                resumed.messages, settings.max_context_chars
+            )
+            recovery_note = args.task or (
+                "继续上一次未完成的任务。请先检查当前工作区文件和最近验证状态，"
+                "不要假设已有修改完整或正确，然后继续实现并重新运行相关测试。"
+            )
+            context.append_user(recovery_note)
+            run_task = resumed.task
+            event_sink(
+                "run_resumed",
+                {
+                    "checkpoint": resumed.checkpoint_id,
+                    "previous_status": resumed.status,
+                },
+            )
+
+        if run_task is None:
+            raise ValueError("任务不能为空")
+
+        checkpoint = None
+        if not args.no_log:
+            checkpoint = CheckpointStore(
+                workspace,
+                run_task,
+                parent_checkpoint=(resumed.checkpoint_id if resumed else None),
+            )
 
         max_steps = settings.max_steps if args.max_steps is None else args.max_steps
         agent = CodingAgent(
@@ -63,9 +114,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             registry,
             max_steps=max_steps,
             max_context_chars=settings.max_context_chars,
-            event_sink=combine_sinks(*sinks),
+            event_sink=event_sink,
+            checkpoint_sink=(checkpoint.save if checkpoint else None),
         )
-        result = agent.run(args.task)
+        result = agent.run(run_task, context=context)
     except (ConfigError, SafetyError, ValueError) as exc:
         print(f"配置错误：{exc}", file=sys.stderr)
         return 2
@@ -80,5 +132,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(result.final_text)
     if logger is not None:
         print(f"运行日志：{logger.path}")
+    if checkpoint is not None:
+        print(f"恢复检查点：{checkpoint.path}")
     return 0 if result.stop_reason == "completed" else 1
-

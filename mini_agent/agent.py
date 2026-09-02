@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import platform
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 from .context import ContextManager
 from .model_client import ModelClient, ModelReply
 from .tools import ToolRegistry
 
 EventSink = Callable[[str, dict], None]
+CheckpointSink = Callable[[list[dict[str, Any]], dict[str, Any]], None]
 
 
 def _system_prompt() -> str:
@@ -49,6 +50,7 @@ class CodingAgent:
         max_context_chars: int = 120_000,
         max_consecutive_tool_errors: int = 3,
         event_sink: EventSink | None = None,
+        checkpoint_sink: CheckpointSink | None = None,
     ) -> None:
         if max_steps < 1:
             raise ValueError("max_steps 必须为正整数")
@@ -60,12 +62,14 @@ class CodingAgent:
         self.max_context_chars = max_context_chars
         self.max_consecutive_tool_errors = max_consecutive_tool_errors
         self.event_sink = event_sink or (lambda _event, _payload: None)
+        self.checkpoint_sink = checkpoint_sink
 
-    def run(self, task: str) -> AgentResult:
+    def run(self, task: str, *, context: ContextManager | None = None) -> AgentResult:
         if not task.strip():
             raise ValueError("任务不能为空")
 
-        context = ContextManager(_system_prompt(), task.strip(), self.max_context_chars)
+        if context is None:
+            context = ContextManager(_system_prompt(), task.strip(), self.max_context_chars)
         tool_call_count = 0
         successful_tool_calls = 0
         consecutive_errors = 0
@@ -74,9 +78,19 @@ class CodingAgent:
         completion_tokens = 0
 
         self._emit("run_started", {"task": task.strip(), "workspace": str(self.registry.workspace.root)})
+        self._save_checkpoint(
+            context,
+            status="running",
+            steps=0,
+            tool_calls=0,
+            successful_tool_calls=0,
+            prompt_tokens=0,
+            completion_tokens=0,
+        )
 
         for step in range(1, self.max_steps + 1):
             model_messages = context.messages_for_model()
+            safe_messages_before_step = context.raw_messages
             self._emit("model_request", {"step": step, "message_count": len(model_messages)})
             reply = self.client.complete(model_messages, self.registry.definitions)
             context.append_assistant(reply.assistant_message)
@@ -87,6 +101,15 @@ class CodingAgent:
                 self._emit("assistant_text", {"step": step, "content": reply.content})
 
             if not reply.tool_calls:
+                self._save_checkpoint(
+                    context,
+                    status="completed",
+                    steps=step,
+                    tool_calls=tool_call_count,
+                    successful_tool_calls=successful_tool_calls,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
                 result = AgentResult(
                     final_text=reply.content,
                     stop_reason="completed",
@@ -99,7 +122,7 @@ class CodingAgent:
                 self._emit("run_finished", _result_payload(result))
                 return result
 
-            for tool_call in reply.tool_calls:
+            for call_index, tool_call in enumerate(reply.tool_calls):
                 tool_call_count += 1
                 self._emit(
                     "tool_call",
@@ -130,6 +153,26 @@ class CodingAgent:
                     last_error = str(parsed_result.get("error", "未知错误"))
                     consecutive_errors += 1
                     if consecutive_errors >= self.max_consecutive_tool_errors:
+                        if call_index == len(reply.tool_calls) - 1:
+                            self._save_checkpoint(
+                                context,
+                                status="tool_error_limit",
+                                steps=step,
+                                tool_calls=tool_call_count,
+                                successful_tool_calls=successful_tool_calls,
+                                prompt_tokens=prompt_tokens,
+                                completion_tokens=completion_tokens,
+                            )
+                        else:
+                            self._save_checkpoint_messages(
+                                safe_messages_before_step,
+                                status="tool_error_limit",
+                                steps=step,
+                                tool_calls=tool_call_count,
+                                successful_tool_calls=successful_tool_calls,
+                                prompt_tokens=prompt_tokens,
+                                completion_tokens=completion_tokens,
+                            )
                         result = AgentResult(
                             final_text=(
                                 f"连续 {consecutive_errors} 次工具执行失败，Agent 已停止。"
@@ -146,6 +189,25 @@ class CodingAgent:
                         self._emit("run_finished", _result_payload(result))
                         return result
 
+            self._save_checkpoint(
+                context,
+                status="running",
+                steps=step,
+                tool_calls=tool_call_count,
+                successful_tool_calls=successful_tool_calls,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+
+        self._save_checkpoint(
+            context,
+            status="max_steps",
+            steps=self.max_steps,
+            tool_calls=tool_call_count,
+            successful_tool_calls=successful_tool_calls,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
         result = AgentResult(
             final_text=(
                 f"达到最大模型步骤数 {self.max_steps}，Agent 已停止。"
@@ -164,6 +226,52 @@ class CodingAgent:
     def _emit(self, event: str, payload: dict) -> None:
         self.event_sink(event, payload)
 
+    def _save_checkpoint(
+        self,
+        context: ContextManager,
+        *,
+        status: str,
+        steps: int,
+        tool_calls: int,
+        successful_tool_calls: int,
+        prompt_tokens: int,
+        completion_tokens: int,
+    ) -> None:
+        self._save_checkpoint_messages(
+            context.raw_messages,
+            status=status,
+            steps=steps,
+            tool_calls=tool_calls,
+            successful_tool_calls=successful_tool_calls,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
+    def _save_checkpoint_messages(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        status: str,
+        steps: int,
+        tool_calls: int,
+        successful_tool_calls: int,
+        prompt_tokens: int,
+        completion_tokens: int,
+    ) -> None:
+        if self.checkpoint_sink is None:
+            return
+        self.checkpoint_sink(
+            messages,
+            {
+                "status": status,
+                "steps": steps,
+                "tool_calls": tool_calls,
+                "successful_tool_calls": successful_tool_calls,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+            },
+        )
+
 
 def _result_payload(result: AgentResult) -> dict:
     return {
@@ -175,4 +283,3 @@ def _result_payload(result: AgentResult) -> dict:
         "prompt_tokens": result.prompt_tokens,
         "completion_tokens": result.completion_tokens,
     }
-

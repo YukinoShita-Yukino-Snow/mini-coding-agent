@@ -38,6 +38,11 @@ class ConsoleReporter:
     def __call__(self, event: str, payload: dict) -> None:
         if event == "run_started":
             print(f"[开始] 工作区：{payload['workspace']}")
+        elif event == "run_resumed":
+            print(
+                f"[恢复] 检查点={payload['checkpoint']} "
+                f"上次状态={payload['previous_status']}"
+            )
         elif event == "model_request":
             print(f"[步骤 {payload['step']}] 正在请求模型决策...")
         elif event == "tool_call":
